@@ -34,8 +34,9 @@ class Semite_gw {
     {
         $this->settings = $this->Settings();
 
-        // Load the Stripe lib.
+        // Load the Semite lib.
         require_once(APPPATH .'libraries/semite/test/semite_autoload.php');
+        require_once(APPPATH .'libraries/mpi/Endeavour.php');
     }
 
     //--------------------------------------------------------------------
@@ -91,6 +92,14 @@ class Semite_gw {
                 'options' => array(
                     '1' => 'Live Mode',
                     '0'	=> 'Testing'
+                )
+            ),
+            '3dsecurempi' => array(
+                'text' => 'Use 3D-Secure Transactions',
+                'type' => 'select',
+                'options' => array(
+                    '1' => 'Yes',
+                    '0'	=> 'No'
                 )
             ),
             'currency' => array(
@@ -224,66 +233,66 @@ class Semite_gw {
         $country = $CI->db->get('countries')->row();
 
         if ($gateway['mode']){
-            $client = new Semite_Client(Semite_Client::ENV_LIVE);
-        } else {
-            $client = new Semite_Client(Semite_Client::ENV_TEST);
-        }
-
-        try {
-            $payment = new Semite_BasicOperations_Payment;
-            $payment->setMember($gateway['api_id'], $gateway['secret_key']);
-            $payment->setCountryCode($customer->country);
-
-            $payment->setCardNumberAndHolder($credit_card['card_num']);
-            $payment->setCardExpiry($credit_card['exp_month'], $credit_card['exp_year']);
-            $payment->setCardValidationCode($credit_card['cvv']);
-
-            $payment->setAmountAndCurrencyId($amount, $gateway['currency']);
-            $payment->setProcessor($gateway['processor']);
-
-            $payment->setTrackingMemberCode('Payment Order ID :  '.$order_id. ' / ' . date('His dmY'));
-            $payment->setMerchantAccountType($gateway['merchant_type']);
-
-            $payment->setDynamicDescriptor($gateway['dba_name'],$gateway['dba_city']);
-
-            $avsAddress = $customer->address_1.' '.$customer->address_2;
-            $avsZip = $customer->postal_code;
-
-            $payment->setAvsAddress($avsAddress,$avsZip);
-
-            $payment->setAdditionalInfo(json_encode($customer));
-
-            $client->call($payment);
-
-            // Successful transaction
-            if ($payment->getResultCode() == 1) {
-
-                $CI->load->model('order_authorization_model');
-                $CI->order_authorization_model->SaveAuthorization($order_id, $payment->getResultTransactionId(), $payment->getResultTransactionGuid());
-                $CI->charge_model->SetStatus($order_id, 1);
-
-                $response_array = array('charge_id' => $order_id);
-                $response = $CI->response->TransactionResponse(1, $response_array);
+                $client = new Semite_Client(Semite_Client::ENV_LIVE);
             } else {
+                $client = new Semite_Client(Semite_Client::ENV_TEST);
+            }
+
+            try {
+                $payment = new Semite_BasicOperations_Payment;
+                $payment->setMember($gateway['api_id'], $gateway['secret_key']);
+                $payment->setCountryCode($customer->country);
+
+                $payment->setCardNumberAndHolder($credit_card['card_num']);
+                $payment->setCardExpiry($credit_card['exp_month'], $credit_card['exp_year']);
+                $payment->setCardValidationCode($credit_card['cvv']);
+
+                $payment->setAmountAndCurrencyId($amount, $gateway['currency']);
+                $payment->setProcessor($gateway['processor']);
+
+                $payment->setTrackingMemberCode('Payment Order ID :  '.$order_id. ' / ' . date('His dmY'));
+                $payment->setMerchantAccountType($gateway['merchant_type']);
+
+                $payment->setDynamicDescriptor($gateway['dba_name'],$gateway['dba_city']);
+
+                $avsAddress = $customer->address_1.' '.$customer->address_2;
+                $avsZip = $customer->postal_code;
+
+                $payment->setAvsAddress($avsAddress,$avsZip);
+
+                $payment->setAdditionalInfo(json_encode($customer));
+
+                $client->call($payment);
+
+                // Successful transaction
+                if ($payment->getResultCode() == 1) {
+
+                    $CI->load->model('order_authorization_model');
+                    $CI->order_authorization_model->SaveAuthorization($order_id, $payment->getResultTransactionId(), $payment->getResultTransactionGuid());
+                    $CI->charge_model->SetStatus($order_id, 1);
+
+                    $response_array = array('charge_id' => $order_id);
+                    $response = $CI->response->TransactionResponse(1, $response_array);
+                } else {
+                    // Failed Transaction
+                    $CI->load->model('charge_model');
+                    $CI->charge_model->SetStatus($order_id, 0);
+
+                    $response_array = array('reason' => $payment->getResultReason());
+                    $response = $CI->response->TransactionResponse(2, $response_array);
+                }
+            }
+            catch (Exception $e)
+            {
                 // Failed Transaction
                 $CI->load->model('charge_model');
                 $CI->charge_model->SetStatus($order_id, 0);
 
-                $response_array = array('reason' => $payment->getResultReason());
+                $response_array = array('reason' => $e->getMessage());
                 $response = $CI->response->TransactionResponse(2, $response_array);
             }
-        }
-        catch (Exception $e)
-        {
-            // Failed Transaction
-            $CI->load->model('charge_model');
-            $CI->charge_model->SetStatus($order_id, 0);
 
-            $response_array = array('reason' => $e->getMessage());
-            $response = $CI->response->TransactionResponse(2, $response_array);
-        }
-
-        return $response;
+            return $response;
     }
 
     //--------------------------------------------------------------------
